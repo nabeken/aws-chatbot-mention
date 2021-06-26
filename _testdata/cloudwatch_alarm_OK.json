@@ -1,0 +1,30 @@
+{
+  "AlarmName": "ChatbotTest2",
+  "AlarmDescription": "mention-ALARM:<!channel>\nmention-OK:<!here>",
+  "AWSAccountId": "1234567890",
+  "NewStateValue": "OK",
+  "NewStateReason": "Threshold Crossed: no datapoints were received for 1 period and 1 missing datapoint was treated as [NonBreaching].",
+  "StateChangeTime": "2021-06-26T06:08:51.317+0000",
+  "Region": "Asia Pacific (Tokyo)",
+  "AlarmArn": "arn:aws:cloudwatch:ap-northeast-1:1234567890:alarm:ChatbotTest2",
+  "OldStateValue": "INSUFFICIENT_DATA",
+  "Trigger": {
+    "MetricName": "NumberOfMessagesPublished",
+    "Namespace": "AWS/SNS",
+    "StatisticType": "Statistic",
+    "Statistic": "SUM",
+    "Unit": null,
+    "Dimensions": [
+      {
+        "value": "chatbot",
+        "name": "TopicName"
+      }
+    ],
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "Threshold": 1,
+    "TreatMissingData": "- TreatMissingData:                    notBreaching",
+    "EvaluateLowSampleCountPercentile": ""
+  }
+}

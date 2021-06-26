@@ -1,4 +1,4 @@
-module github.com/nabeken/aws-chatbot-slack-mention
+module github.com/nabeken/aws-chatbot-mention
 
 go 1.16
 
