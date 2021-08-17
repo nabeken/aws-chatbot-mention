@@ -39,7 +39,7 @@ func (h *handler) handle(e events.SNSEvent) error {
 			err error
 		)
 
-		em, err = h.detectEventType(er.SNS.Message)
+		em, err = h.detectEventType(er.SNS)
 		if err != nil {
 			log.Printf("using the message as-is: %s", err)
 			em = unknownEventMessage(er.SNS.Message)
@@ -63,10 +63,15 @@ func (h *handler) handle(e events.SNSEvent) error {
 	return nil
 }
 
-func (h *handler) detectEventType(msg string) (eventMessageMarshaler, error) {
-	if cwa := h.detectCloudWatchAlarmEvent(msg); cwa != nil {
-		// we found a CloudWatch Alarm
+func (h *handler) detectEventType(snse events.SNSEntity) (eventMessageMarshaler, error) {
+	// try with CloudWatch Alarm
+	if cwa := h.detectCloudWatchAlarmEvent(snse.Message); cwa != nil {
 		return cwa, nil
+	}
+
+	// try with CloudWatch Events
+	if cwe := h.detectCloudWatchEvent(snse); cwe != nil {
+		return cwe, nil
 	}
 
 	return nil, errors.New("no event type detected")
@@ -81,6 +86,63 @@ func (h *handler) detectCloudWatchAlarmEvent(msg string) *cloudWatchAlarmEvent {
 	}
 
 	return (&cloudWatchAlarmEvent{cwa: cwa}).update()
+}
+
+func (h *handler) detectCloudWatchEvent(snse events.SNSEntity) *cloudWatchEvent {
+	cwe := &events.CloudWatchEvent{}
+	err := json.Unmarshal([]byte(snse.Message), cwe)
+	if err != nil || cwe.DetailType == "" {
+		log.Printf("unable to unmarshal into *events.CloudWatchEvent. skipping...: %s", err)
+		return nil
+	}
+
+	return (&cloudWatchEvent{cwe: cwe, snsEvent: snse}).update()
+}
+
+type cloudWatchEvent struct {
+	cwe      *events.CloudWatchEvent
+	snsEvent events.SNSEntity
+}
+
+func (e *cloudWatchEvent) MarshalSNSJSONString() (string, error) {
+	b, err := json.Marshal(e.cwe)
+	if err != nil {
+		return "", fmt.Errorf("unable to marshal into JSON: %w", err)
+	}
+	return string(b), nil
+}
+
+func (e *cloudWatchEvent) update() *cloudWatchEvent {
+	const keyToinject = "userAgent"
+
+	// TODO: looking for the tags in the topic
+	mentionTo := "<!channel>"
+
+	detail := make(map[string]interface{})
+	if err := json.Unmarshal(e.cwe.Detail, &detail); err != nil {
+		// nothing to do
+		log.Printf("unable to unmarshal the event detail. skipping...: %s", err)
+		return e
+	}
+
+	keyValue, ok := detail[keyToinject]
+	if !ok {
+		log.Print("no key to inject in the event. skipping.")
+		return e
+	}
+
+	// will inject a Slack mention into the key to inject
+	if keyValueStr, ok := keyValue.(string); ok && keyValueStr != "" {
+		detail[keyToinject] = keyValueStr + "\n" + mentionTo + "\n"
+	}
+	detailJSON, err := json.Marshal(detail)
+	if err != nil {
+		log.Printf("unable to re-marshal the event: %w", err)
+		return e
+	}
+
+	e.cwe.Detail = detailJSON
+	return e
 }
 
 type cloudWatchAlarmEvent struct {
