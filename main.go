@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"github.com/aws/aws-sdk-go-v2/service/sns/types"
 )
 
 type handler struct {
@@ -96,10 +99,11 @@ func (h *handler) detectCloudWatchEvent(snse events.SNSEntity) *cloudWatchEvent 
 		return nil
 	}
 
-	return (&cloudWatchEvent{cwe: cwe, snsEvent: snse}).update()
+	return (&cloudWatchEvent{snsSvc: h.snsSvc, cwe: cwe, snsEvent: snse}).update()
 }
 
 type cloudWatchEvent struct {
+	snsSvc   *sns.Client
 	cwe      *events.CloudWatchEvent
 	snsEvent events.SNSEntity
 }
@@ -112,11 +116,47 @@ func (e *cloudWatchEvent) MarshalSNSJSONString() (string, error) {
 	return string(b), nil
 }
 
+func (e cloudWatchEvent) getMentionToByTag() (string, error) {
+	req := &sns.ListTagsForResourceInput{
+		ResourceArn: aws.String(e.snsEvent.TopicArn),
+	}
+
+	resp, err := e.snsSvc.ListTagsForResource(context.Background(), req)
+	if err != nil {
+		return "", fmt.Errorf("unable to get the tag from the resource: %w", err)
+	}
+
+	tag, err := findTagByKey(resp.Tags, "SLACK_GROUP")
+	if err != nil {
+		return "", err
+	}
+
+	b, err := base64.StdEncoding.DecodeString(*tag.Value)
+	if err != nil {
+		return "", fmt.Errorf("unable to decode the value in base64: %w", err)
+	}
+
+	return string(b), nil
+}
+
+func findTagByKey(tags []types.Tag, key string) (types.Tag, error) {
+	for _, t := range tags {
+		if *t.Key == key {
+			return t, nil
+		}
+	}
+
+	return types.Tag{}, fmt.Errorf("tag not found for '%s'", key)
+}
+
 func (e *cloudWatchEvent) update() *cloudWatchEvent {
 	const keyToinject = "userAgent"
 
-	// TODO: looking for the tags in the topic
-	mentionTo := "<!channel>"
+	mentionTo, err := e.getMentionToByTag()
+	if err != nil {
+		log.Printf("unable to get the mention-to. skipping...: %s", err)
+		return e
+	}
 
 	detail := make(map[string]interface{})
 	if err := json.Unmarshal(e.cwe.Detail, &detail); err != nil {
